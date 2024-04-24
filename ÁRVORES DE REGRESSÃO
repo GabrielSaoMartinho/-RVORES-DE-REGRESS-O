@@ -1,0 +1,117 @@
+library(tree)
+library(MASS)
+library(ISLR)
+library(randomForest)
+library(gbm)
+library(knitr)
+
+data("Carseats")
+
+# Questão (a): Dividindo o conjunto de dados em treinamento e teste
+set.seed(10)
+train <- sample(1:nrow(Carseats), nrow(Carseats) / 2) 
+train_data <- Carseats[train, ] 
+test_data <- Carseats[-train, ] 
+dim(train_data)
+dim(test_data)
+# Questão (b): Ajustando uma árvore de regressão ao conjunto de treinamento
+
+tree.carseats <- tree(Sales ~ ., data = Carseats, subset = train)
+summary(tree.carseats)
+plot(tree.carseats)
+text(tree.carseats, pretty = 0)
+
+set.seed(10)
+test_predictions = predict(tree.carseats, newdata = test_data)
+test_mse = mean((test_predictions - test_data$Sales) ^ 2)
+cat("Erro médio quadratico no conjunto de teste:", test_mse, "\n")
+
+# Questão (c): Uso de validação cruzada para determinar o nível ótimo de complexidade da árvore
+set.seed(10)
+cv.carseats <- cv.tree(tree.carseats)  
+plot(cv.carseats$size, cv.carseats$dev, type = 'b', 
+     xlab = "Tamanho da Árvore", 
+     ylab = "Desvio", 
+     main = "Validação Cruzada: Desvio em relação ao Tamanho da Árvore")
+text(cv.carseats$size, cv.carseats$dev, 
+     labels = round(cv.carseats$dev, 2), 
+     pos = 3, cex = 0.7)  
+
+tamanho_arvore <- cv.carseats$size
+desvio <- cv.carseats$dev
+tabela <- data.frame("Tamanho da Árvore" = tamanho_arvore, "Desvio" = desvio)
+kable(tabela, "pipe")
+
+prune.carseats = prune.tree(tree.carseats, best = 12)
+plot(prune.carseats)
+text(prune.carseats, pretty = 0)
+
+prune.carseats <- prune.tree(tree.carseats, best = 12)
+test_predictions <- predict(prune.carseats, newdata = test_data)
+pruned_mse <- mean((test_predictions - test_data$Sales) ^ 2)
+cat("Erro médio quadrado após poda da árvore:", pruned_mse, "\n")
+
+# Questão (d): Uso da abordagem de bagging para analisar esses dados
+set.seed(10)
+bag.carseats = randomForest(Sales ~ ., data = Carseats, 
+                            subset = train, 
+                            mtry = ncol(train_data) - 1, 
+                            ntree = 25, 
+                            importance = TRUE)
+bag.carseats  
+
+yhat.bag = predict(bag.carseats, newdata = test_data)
+novo_mse = mean((yhat.bag - test_data$Sales) ^ 2)
+cat("Erro Médio Quadratico (Bagging):", novo_mse, "\n")
+
+importance(bag.carseats)
+varImpPlot(bag.carseats)
+
+# Questão (e): Uso de random forests para analisar esses dados
+set.seed(10)
+rf.carseats = randomForest(Sales ~ ., data = Carseats, subset = train, mtry = 12, importance = TRUE)
+yhat.rf = predict(rf.carseats, newdata = test_data)
+rf_mse = mean((yhat.rf - test_data$Sales) ^ 2) 
+print("Erro Médio Quadratico (Random Forests): ")
+print(rf_mse)
+
+set.seed(10)
+importance(rf.carseats)
+varImpPlot(rf.carseats)
+
+set.seed(10)
+boost.carseats = gbm(Sales ~ ., 
+                     data = train_data,
+                     distribution = "gaussian", 
+                     n.trees = 5000,
+                     interaction.depth = 4,
+                     shrinkage = 0.001, 
+                     verbose = FALSE)
+
+yhat.boost = predict(boost.carseats, newdata = test_data, n.trees = 5000)
+boost_mse = mean((yhat.boost - test_data$Sales) ^ 2)
+cat("Erro Médio Quadratico (Boosting):", boost_mse, "\n")
+
+summary(boost.carseats)
+
+par(mfrow = c(1, 2))
+plot(boost.carseats, i = "Price") 
+plot(boost.carseats, i = "ShelveLoc") 
+
+mtry_values = c(1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18)
+mse_results = c()
+for (mtry in mtry_values) {
+  set.seed(10)
+  rf_model = randomForest(Sales ~ ., data = Carseats, subset = train, mtry = mtry, ntree = 25, importance = TRUE)
+  yhat.rf = predict(rf_model, newdata = test_data)
+  mse = mean((yhat.rf - test_data$Sales) ^ 2)  
+  mse_results = c(mse_results, mse)
+}
+
+results = data.frame(mtry = mtry_values, MSE = mse_results)
+print(results)
+plot(results$mtry, results$MSE, type = "b", col = "blue",
+     xlab = "Número de variáveis consideradas em cada divisão (mtry)",
+     ylab = "Erro médio quadrático (MSE)",
+     main = "Efeito de mtry na taxa de erro")
+
